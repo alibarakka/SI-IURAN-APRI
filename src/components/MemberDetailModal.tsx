@@ -67,7 +67,7 @@ export const MemberDetailModal: React.FC<MemberDetailModalProps> = ({
             <img 
               src={sealImageUrl} 
               alt="APRI Seal" 
-              className="w-10 h-10 object-contain rounded-full shadow-xs"
+              className="h-10 w-auto object-contain shrink-0"
               referrerPolicy="no-referrer"
             />
             <div>

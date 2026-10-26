@@ -242,7 +242,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           <img 
             src={sealImageUrl} 
             alt="Emblem APRI Sulsel" 
-            className="w-20 h-20 mx-auto object-contain drop-shadow-md rounded-full bg-white/10 p-1 mb-3"
+            className="w-20 h-24 mx-auto object-contain drop-shadow-lg mb-2"
             referrerPolicy="no-referrer"
           />
           <div className="text-[11px] uppercase tracking-wider font-semibold text-emerald-200">

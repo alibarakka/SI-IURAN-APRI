@@ -92,7 +92,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                 <img 
                   src={sealImageUrl} 
                   alt="APRI" 
-                  className="w-9 h-9 object-contain rounded-full bg-white/10 p-0.5"
+                  className="h-9 w-auto object-contain shrink-0"
                   referrerPolicy="no-referrer"
                 />
                 <div>

@@ -97,8 +97,13 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         {/* Modal Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-800 text-white flex items-center justify-center font-bold text-sm shadow-xs">
-              APRI
+            <div className="w-10 h-10 flex items-center justify-center shrink-0">
+              <img 
+                src="/assets/aistudio/logo_apri_transparent.png" 
+                alt="Logo APRI" 
+                className="w-full h-full object-contain"
+                referrerPolicy="no-referrer"
+              />
             </div>
             <div>
               <h3 className="text-base font-semibold text-slate-900 leading-tight">
@@ -330,9 +335,17 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                         <rect x="75" y="84" width="10" height="6" />
                       </svg>
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <span className="bg-white/95 px-2 py-0.5 rounded-sm text-[10px] font-bold text-emerald-800 border border-emerald-300 shadow-xs">
-                          APRI SULSEL
-                        </span>
+                        <div className="bg-white p-1 rounded-md border border-slate-200 shadow-xs flex items-center gap-1">
+                          <img 
+                            src="/assets/aistudio/logo_apri_transparent.png" 
+                            alt="APRI" 
+                            className="w-5 h-5 object-contain"
+                            referrerPolicy="no-referrer"
+                          />
+                          <span className="text-[9px] font-bold text-emerald-800">
+                            APRI SULSEL
+                          </span>
+                        </div>
                       </div>
                     </div>
                     <div className="text-xs text-slate-500">

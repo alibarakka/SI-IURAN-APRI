@@ -65,7 +65,7 @@ import { CashFlowModal } from './components/CashFlowModal';
 import { MobileAppView } from './components/MobileAppView';
 import { AuthScreen } from './components/AuthScreen';
 
-const SEAL_IMAGE_URL = '/src/assets/images/apri_sulsel_seal_1792985704534.jpg';
+const SEAL_IMAGE_URL = '/assets/aistudio/logo_apri_transparent.png';
 
 export default function App() {
   // Authentication State
@@ -441,7 +441,7 @@ export default function App() {
             <img 
               src={SEAL_IMAGE_URL} 
               alt="APRI Sulsel" 
-              className="w-9 h-9 object-contain rounded-full shadow-xs"
+              className="h-10 w-auto object-contain shrink-0"
               referrerPolicy="no-referrer"
             />
             <span className="text-base font-bold tracking-tight text-slate-900">
@@ -1459,7 +1459,7 @@ export default function App() {
             <img 
               src={SEAL_IMAGE_URL} 
               alt="APRI" 
-              className="w-6 h-6 object-contain rounded-full" 
+              className="h-6 w-auto object-contain shrink-0" 
               referrerPolicy="no-referrer"
             />
             <span>
