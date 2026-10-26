@@ -38,15 +38,35 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
   currentTahun,
   sealImageUrl
 }) => {
-  const [selectedMemberId, setSelectedMemberId] = useState<string>(members[0]?.id || 'MEM-001');
+  const [selectedMemberId, setSelectedMemberId] = useState<string>(members[0]?.id || '');
 
   const currentMember = members.find(m => m.id === selectedMemberId) || members[0];
-  const memberRecords = records
-    .filter(r => r.memberId === currentMember.id)
-    .sort((a, b) => b.periodeBulan - a.periodeBulan);
+  const memberRecords = currentMember 
+    ? records
+        .filter(r => r.memberId === currentMember.id)
+        .sort((a, b) => b.periodeBulan - a.periodeBulan)
+    : [];
 
   const currentMonthRecord = memberRecords.find(r => r.periodeBulan === currentBulan && r.periodeTahun === currentTahun);
   const isPaidThisMonth = currentMonthRecord?.status === 'LUNAS';
+
+  if (!currentMember) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 px-4">
+        <div className="w-full max-w-sm bg-white border border-slate-200 rounded-3xl p-8 text-center shadow-sm space-y-4">
+          <div className="w-16 h-16 bg-emerald-50 text-emerald-800 rounded-full flex items-center justify-center mx-auto">
+            <Smartphone className="w-8 h-8" />
+          </div>
+          <h3 className="text-base font-bold text-slate-900">
+            Preview Aplikasi Mobile Anggota
+          </h3>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Belum ada data anggota yang terdaftar. Setelah anggota mendaftarkan diri, simulasi tampilan mobile KTA & pembayaran iuran akan aktif otomatis di sini.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-center justify-center py-6 px-4">

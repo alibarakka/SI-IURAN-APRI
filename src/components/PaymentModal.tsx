@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { IuranRecord, PaymentMethod, PenghuluMember } from '../types';
 import { formatRupiah, generateKwitansiPDF } from '../utils/exporter';
-import { NAMA_BULAN } from '../data/mockData';
+import { NAMA_BULAN, calculateDistribution } from '../data/mockData';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -70,16 +70,20 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       const tglBayar = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
       const kwitansiCode = `KW-APRI-SS/${iuran.periodeTahun}/${pad(iuran.periodeBulan)}/${Math.floor(1000 + Math.random() * 9000)}`;
 
+      const isBulanan = iuran.jenisIuran !== 'PANGKAL' && iuran.periodeBulan > 0;
       const updatedRecord: IuranRecord = {
         ...iuran,
         nominal: totalBayar,
         nominalSukarela: nominalSukarela > 0 ? nominalSukarela : undefined,
+        distribusi: isBulanan ? calculateDistribution(iuran.nominal) : undefined,
         status: 'LUNAS',
         tanggalBayar: tglBayar,
         metodePembayaran: selectedMethod,
         nomorReferensi: selectedMethod === 'QRIS' ? `QRIS-ID-${Date.now().toString().slice(-8)}` : vaCode,
         kodeKwitansi: kwitansiCode,
-        catatan: `Lunas via ${selectedMethod.replace('_', ' ')} (Real-time Gateway Verified)`
+        catatan: isBulanan
+          ? `Lunas via ${selectedMethod.replace('_', ' ')} (Alokasi: PC 60%, PW 25%, PP 15%)`
+          : `Lunas via ${selectedMethod.replace('_', ' ')} (Iuran Pangkal Registrasi Baru)`
       };
 
       setIsProcessing(false);
@@ -190,8 +194,17 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               {/* Member & Invoice Summary Banner */}
               <div className="bg-emerald-50/80 border border-emerald-100 rounded-xl p-4 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
                 <div>
-                  <div className="text-xs text-emerald-800 font-medium">Tagihan Iuran Bulanan Penghulu</div>
-                  <div className="text-base font-bold text-slate-900 mt-0.5">{iuran.memberNama}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-200/80 text-emerald-900">
+                      {iuran.jenisIuran === 'PANGKAL' || iuran.periodeBulan === 0 ? 'IURAN PANGKAL' : 'IURAN BULANAN'}
+                    </span>
+                    <span className="text-xs text-emerald-800 font-medium">
+                      {iuran.jenisIuran === 'PANGKAL' || iuran.periodeBulan === 0 
+                        ? 'Pendaftaran Anggota Baru (1x seumur hidup)' 
+                        : 'Sesuai AD/ART & PO APRI'}
+                    </span>
+                  </div>
+                  <div className="text-base font-bold text-slate-900 mt-1">{iuran.memberNama}</div>
                   <div className="text-xs text-slate-600 mt-0.5">
                     NIP: {iuran.nip} · {iuran.kuaKecamatan} ({iuran.kabKota})
                   </div>
@@ -199,13 +212,39 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 <div className="text-right sm:border-l sm:border-emerald-200 sm:pl-4">
                   <span className="text-xs text-slate-500">Periode Tagihan:</span>
                   <div className="text-sm font-bold text-emerald-900">
-                    {NAMA_BULAN[iuran.periodeBulan - 1]} {iuran.periodeTahun}
+                    {iuran.jenisIuran === 'PANGKAL' || iuran.periodeBulan === 0 
+                      ? 'Registrasi Baru' 
+                      : `${NAMA_BULAN[iuran.periodeBulan - 1]} ${iuran.periodeTahun}`}
                   </div>
                   <div className="text-xs text-amber-700 mt-0.5 font-medium">
-                    Jatuh Tempo: 10 {NAMA_BULAN[iuran.periodeBulan - 1]}
+                    {iuran.jenisIuran === 'PANGKAL' || iuran.periodeBulan === 0 ? 'Wajib Saat Pendaftaran' : `Jatuh Tempo: 10 ${NAMA_BULAN[iuran.periodeBulan - 1]}`}
                   </div>
                 </div>
               </div>
+
+              {/* AD/ART Distribution Info for Monthly Dues */}
+              {(iuran.jenisIuran !== 'PANGKAL' && iuran.periodeBulan > 0) && (
+                <div className="bg-white border border-emerald-200 rounded-xl p-3 text-xs space-y-1.5">
+                  <div className="flex items-center justify-between text-slate-700 font-semibold text-[11px]">
+                    <span className="text-emerald-900">Alokasi Distribusi Iuran Berjenjang (AD/ART APRI):</span>
+                    <span className="font-mono text-emerald-800">Rp 50.000</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5 text-center pt-0.5">
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-1.5">
+                      <span className="text-[10px] text-slate-500 block">PC Cabang (60%)</span>
+                      <span className="font-mono font-bold text-emerald-800">Rp 30.000</span>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-1.5">
+                      <span className="text-[10px] text-slate-500 block">PW Sulsel (25%)</span>
+                      <span className="font-mono font-bold text-emerald-800">Rp 12.500</span>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-1.5">
+                      <span className="text-[10px] text-slate-500 block">PP Pusat (15%)</span>
+                      <span className="font-mono font-bold text-emerald-800">Rp 7.500</span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Infaq / Sumbangan Sukarela Optional */}
               <div>

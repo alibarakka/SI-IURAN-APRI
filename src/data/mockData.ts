@@ -1,4 +1,4 @@
-import { PenghuluMember, IuranRecord, CashFlowEntry, NotificationLog, AuthUser } from '../types';
+import { PenghuluMember, IuranRecord, CashFlowEntry, NotificationLog, AuthUser, IuranDistribution } from '../types';
 
 export const KAB_KOTA_SULSEL = [
   'Kota Makassar',
@@ -32,7 +32,40 @@ export const NAMA_BULAN = [
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
 ];
 
-export const IURAN_WAJIB_DEFAULT = 50000; // Rp 50.000 / bulan
+/**
+ * BESARAN IURAN SESUAI AD/ART & PERATURAN ORGANISASI (PO) APRI:
+ * - Iuran Pangkal: Rp 100.000 (Dibayarkan sekali saat pendaftaran anggota baru)
+ * - Iuran Bulanan: Rp 50.000 / bulan per anggota
+ */
+export const IURAN_PANGKAL = 100000; // Rp 100.000
+export const IURAN_BULANAN = 50000;  // Rp 50.000 / bulan
+export const IURAN_WAJIB_DEFAULT = IURAN_BULANAN;
+
+/**
+ * ALOKASI DISTRIBUSI IURAN BULANAN (Rp 50.000):
+ * - 15% untuk Pengurus Pusat (PP) = Rp 7.500
+ * - 25% untuk Pengurus Wilayah (PW Sulsel) = Rp 12.500
+ * - 60% untuk Pengurus Cabang (PC Kab/Kota) = Rp 30.000
+ */
+export const DISTRIBUSI_PERSEN = {
+  PP: 0.15,
+  PW: 0.25,
+  PC: 0.60,
+};
+
+export function calculateDistribution(nominal: number): IuranDistribution {
+  const pp = Math.round(nominal * DISTRIBUSI_PERSEN.PP); // 15%
+  const pw = Math.round(nominal * DISTRIBUSI_PERSEN.PW); // 25%
+  const pc = Math.round(nominal * DISTRIBUSI_PERSEN.PC); // 60%
+  return {
+    pp,
+    pw,
+    pc,
+    ppNominal: pp,
+    pwNominal: pw,
+    pcNominal: pc,
+  };
+}
 
 // Default Admin Accounts
 export const DEFAULT_ADMIN_WILAYAH: AuthUser = {
@@ -100,6 +133,24 @@ export function generateInitialIuranRecords(members: PenghuluMember[]): IuranRec
   const currentMonth = 10; // Oktober 2026
 
   members.forEach(m => {
+    // 1. Iuran Pangkal Registrasi
+    records.push({
+      id: `IUR-PANGKAL-${m.id}`,
+      memberId: m.id,
+      memberNama: m.namaLengkap,
+      nip: m.nip,
+      kabKota: m.kabKota,
+      kuaKecamatan: m.kuaKecamatan,
+      periodeBulan: 0, // 0 for Pangkal
+      periodeTahun: 2026,
+      nominal: IURAN_PANGKAL,
+      jenisIuran: 'PANGKAL',
+      status: m.statusIuranPangkal || 'BELUM_BAYAR',
+      tanggalJatuhTempo: m.joinDate || '2026-01-10',
+      catatan: 'Iuran Pangkal Pendaftaran Anggota Baru APRI (1x seumur hidup)'
+    });
+
+    // 2. Iuran Bulanan Berjalan
     for (let month = 1; month <= currentMonth; month++) {
       const monthStr = month < 10 ? `0${month}` : `${month}`;
       records.push({
@@ -111,9 +162,12 @@ export function generateInitialIuranRecords(members: PenghuluMember[]): IuranRec
         kuaKecamatan: m.kuaKecamatan,
         periodeBulan: month,
         periodeTahun: 2026,
-        nominal: IURAN_WAJIB_DEFAULT,
+        nominal: IURAN_BULANAN,
+        jenisIuran: 'BULANAN',
+        distribusi: calculateDistribution(IURAN_BULANAN),
         status: 'BELUM_BAYAR',
-        tanggalJatuhTempo: `2026-${monthStr}-10`
+        tanggalJatuhTempo: `2026-${monthStr}-10`,
+        catatan: `Iuran Bulanan AD/ART APRI: PC (60%) Rp 30.000 · PW (25%) Rp 12.500 · PP (15%) Rp 7.500`
       });
     }
   });

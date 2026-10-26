@@ -224,11 +224,21 @@ export const MemberDetailModal: React.FC<MemberDetailModalProps> = ({
                 {memberRecords.map(rec => (
                   <div key={rec.id} className="p-3 flex items-center justify-between hover:bg-slate-50 text-xs">
                     <div>
-                      <div className="font-semibold text-slate-800">
-                        {NAMA_BULAN[rec.periodeBulan - 1]} {rec.periodeTahun}
+                      <div className="font-semibold text-slate-800 flex items-center gap-2">
+                        <span>{rec.periodeBulan === 0 ? 'Pendaftaran Anggota' : `${NAMA_BULAN[rec.periodeBulan - 1]} ${rec.periodeTahun}`}</span>
+                        <span className={`text-[10px] px-1.5 py-0.2 rounded font-medium ${
+                          rec.jenisIuran === 'PANGKAL' ? 'bg-purple-50 text-purple-700' : 'bg-emerald-50 text-emerald-700'
+                        }`}>
+                          {rec.jenisIuran === 'PANGKAL' ? 'Iuran Pangkal (1x)' : 'Iuran Bulanan'}
+                        </span>
                       </div>
                       <div className="text-[11px] text-slate-500">
                         Jatuh tempo: {rec.tanggalJatuhTempo} · Rp {rec.nominal.toLocaleString('id-ID')}
+                        {rec.distribusi && rec.jenisIuran !== 'PANGKAL' && (
+                          <span className="text-emerald-700 ml-1.5 font-medium">
+                            (PC: Rp {(rec.distribusi.pcNominal ?? rec.distribusi.pc).toLocaleString('id-ID')} | PW: Rp {(rec.distribusi.pwNominal ?? rec.distribusi.pw).toLocaleString('id-ID')} | PP: Rp {(rec.distribusi.ppNominal ?? rec.distribusi.pp).toLocaleString('id-ID')})
+                          </span>
+                        )}
                       </div>
                     </div>
 

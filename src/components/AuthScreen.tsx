@@ -453,6 +453,53 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 </p>
               </div>
 
+              {/* Ketentuan AD/ART APRI Info Box */}
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-700" />
+                    <span>Ketentuan Iuran Berdasarkan AD/ART & PO APRI</span>
+                  </div>
+                  <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                    Resmi AD/ART
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  <div className="bg-white p-2.5 rounded-xl border border-emerald-100">
+                    <span className="text-[10px] text-slate-500 block">Iuran Pangkal (1x Registrasi)</span>
+                    <span className="font-mono font-bold text-slate-900 text-sm">Rp 100.000</span>
+                    <span className="text-[10px] text-emerald-700 block mt-0.5">Dibayarkan sekali saat pendaftaran</span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-emerald-100">
+                    <span className="text-[10px] text-slate-500 block">Iuran Wajib Bulanan</span>
+                    <span className="font-mono font-bold text-slate-900 text-sm">Rp 50.000 / bln</span>
+                    <span className="text-[10px] text-slate-500 block mt-0.5">Jatuh tempo setiap tanggal 10</span>
+                  </div>
+                </div>
+
+                {/* Distribusi Berjenjang 60% - 25% - 15% */}
+                <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-100 text-[11px] text-slate-700 space-y-1">
+                  <div className="font-semibold text-emerald-900 text-xs">
+                    Alokasi Distribusi Iuran Bulanan (Rp 50.000):
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5 text-center pt-1">
+                    <div className="bg-emerald-50/70 p-1.5 rounded-lg border border-emerald-200/60">
+                      <div className="text-[10px] font-bold text-emerald-800">PC Cabang (60%)</div>
+                      <div className="font-mono font-bold text-slate-900">Rp 30.000</div>
+                    </div>
+                    <div className="bg-emerald-50/70 p-1.5 rounded-lg border border-emerald-200/60">
+                      <div className="text-[10px] font-bold text-emerald-800">PW Sulsel (25%)</div>
+                      <div className="font-mono font-bold text-slate-900">Rp 12.500</div>
+                    </div>
+                    <div className="bg-emerald-50/70 p-1.5 rounded-lg border border-emerald-200/60">
+                      <div className="text-[10px] font-bold text-emerald-800">PP Pusat (15%)</div>
+                      <div className="font-mono font-bold text-slate-900">Rp 7.500</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {regError && (
                 <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-xs text-rose-800">
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />

@@ -22,6 +22,9 @@ import {
   Lock, 
   Unlock, 
   Building2, 
+  Landmark,
+  Compass,
+  Percent,
   MapPin, 
   ExternalLink,
   ChevronRight,
@@ -48,7 +51,10 @@ import {
   INITIAL_NOTIFICATIONS, 
   KAB_KOTA_SULSEL, 
   NAMA_BULAN,
-  IURAN_WAJIB_DEFAULT 
+  IURAN_WAJIB_DEFAULT,
+  IURAN_PANGKAL,
+  IURAN_BULANAN,
+  calculateDistribution
 } from './data/mockData';
 import { 
   formatRupiah, 
@@ -62,6 +68,7 @@ import { PaymentModal } from './components/PaymentModal';
 import { ReminderModal } from './components/ReminderModal';
 import { MemberDetailModal } from './components/MemberDetailModal';
 import { CashFlowModal } from './components/CashFlowModal';
+import { FinancialReportView } from './components/FinancialReportView';
 import { MobileAppView } from './components/MobileAppView';
 import { AuthScreen } from './components/AuthScreen';
 
@@ -155,8 +162,27 @@ export default function App() {
     const updatedMembers = [newMember, ...members];
     setMembers(updatedMembers);
 
-    // 2. Generate monthly iuran records for this member for 2026 (Januari s/d Oktober)
+    // 2. Generate Iuran Pangkal (Rp 100.000) dan Iuran Bulanan (Rp 50.000) sesuai AD/ART & PO APRI
     const newRecords: IuranRecord[] = [];
+
+    // a. Iuran Pangkal Pendaftaran Anggota Baru (1x seumur hidup)
+    newRecords.push({
+      id: `IUR-PANGKAL-${newMember.id}`,
+      memberId: newMember.id,
+      memberNama: newMember.namaLengkap,
+      nip: newMember.nip,
+      kabKota: newMember.kabKota,
+      kuaKecamatan: newMember.kuaKecamatan,
+      periodeBulan: 0,
+      periodeTahun: 2026,
+      nominal: IURAN_PANGKAL,
+      jenisIuran: 'PANGKAL',
+      status: 'BELUM_BAYAR',
+      tanggalJatuhTempo: newMember.joinDate,
+      catatan: 'Iuran Pangkal Pendaftaran Anggota Baru APRI (1x)'
+    });
+
+    // b. Iuran Wajib Bulanan dengan alokasi PC (60%), PW (25%), PP (15%)
     for (let month = 1; month <= 10; month++) {
       const monthStr = month < 10 ? `0${month}` : `${month}`;
       newRecords.push({
@@ -168,9 +194,12 @@ export default function App() {
         kuaKecamatan: newMember.kuaKecamatan,
         periodeBulan: month,
         periodeTahun: 2026,
-        nominal: IURAN_WAJIB_DEFAULT,
+        nominal: IURAN_BULANAN,
+        jenisIuran: 'BULANAN',
+        distribusi: calculateDistribution(IURAN_BULANAN),
         status: 'BELUM_BAYAR',
-        tanggalJatuhTempo: `2026-${monthStr}-10`
+        tanggalJatuhTempo: `2026-${monthStr}-10`,
+        catatan: 'Iuran Bulanan AD/ART APRI: PC 60% (Rp 30.000), PW 25% (Rp 12.500), PP 15% (Rp 7.500)'
       });
     }
 
@@ -240,16 +269,30 @@ export default function App() {
     const belumBayarRecords = scopeRecords.filter(r => r.status === 'BELUM_BAYAR' || r.status === 'TERLAMBAT');
     const waitingRecords = scopeRecords.filter(r => r.status === 'MENUNGGU_VERIFIKASI');
 
+    const lunasBulanan = lunasRecords.filter(r => r.jenisIuran !== 'PANGKAL' && r.periodeBulan > 0);
+    const totalBulananTerkumpul = lunasBulanan.reduce((acc, curr) => acc + curr.nominal, 0);
+    const lunasPangkal = lunasRecords.filter(r => r.jenisIuran === 'PANGKAL' || r.periodeBulan === 0);
+    const totalPangkalTerkumpul = lunasPangkal.reduce((acc, curr) => acc + curr.nominal, 0);
     const totalDanaTerkumpul = lunasRecords.reduce((acc, curr) => acc + curr.nominal, 0);
     const totalTunggakan = belumBayarRecords.reduce((acc, curr) => acc + curr.nominal, 0);
+    
+    // Alokasi AD/ART 60% PC, 25% PW, 15% PP
+    const totalPorsiPC = Math.round(totalBulananTerkumpul * 0.60);
+    const totalPorsiPW = Math.round(totalBulananTerkumpul * 0.25);
+    const totalPorsiPP = Math.round(totalBulananTerkumpul * 0.15);
+
     const persentaseKepatuhan = totalRecordsInPeriod > 0 
       ? Math.round((lunasRecords.length / totalRecordsInPeriod) * 100) 
       : 0;
 
-    const totalPemasukanBKU = cashFlow
+    const relevantCashFlow = currentUser?.role === 'BENDAHARA_CABANG' && currentUser.kabKota
+      ? cashFlow.filter(c => c.kabKota === currentUser.kabKota)
+      : cashFlow;
+
+    const totalPemasukanBKU = relevantCashFlow
       .filter(c => c.jenis === 'MASUK')
       .reduce((acc, curr) => acc + curr.nominal, 0);
-    const totalPengeluaranBKU = cashFlow
+    const totalPengeluaranBKU = relevantCashFlow
       .filter(c => c.jenis === 'KELUAR')
       .reduce((acc, curr) => acc + curr.nominal, 0);
     const saldoKasSaatIni = totalPemasukanBKU - totalPengeluaranBKU;
@@ -260,6 +303,11 @@ export default function App() {
       belumBayarCount: belumBayarRecords.length,
       waitingCount: waitingRecords.length,
       totalDanaTerkumpul,
+      totalBulananTerkumpul,
+      totalPangkalTerkumpul,
+      totalPorsiPC,
+      totalPorsiPW,
+      totalPorsiPP,
       totalTunggakan,
       persentaseKepatuhan,
       saldoKasSaatIni,
@@ -269,7 +317,7 @@ export default function App() {
     };
   }, [currentPeriodRecords, cashFlow, currentUser]);
 
-  // Regional breakdown
+  // Regional breakdown with AD/ART Distribution
   const regionalSummaries: RegionalSummary[] = useMemo(() => {
     return KAB_KOTA_SULSEL.map(kab => {
       const kabRecords = currentPeriodRecords.filter(r => r.kabKota === kab);
@@ -285,6 +333,9 @@ export default function App() {
         lunasCount: lunas,
         belumBayarCount: belum,
         totalTerkumpul: terkumpul,
+        porsiPC: Math.round(terkumpul * 0.60), // 60% hak cabang
+        porsiPW: Math.round(terkumpul * 0.25), // 25% hak wilayah
+        porsiPP: Math.round(terkumpul * 0.15), // 15% hak pusat
         persentaseKepatuhan: pct
       };
     }).sort((a, b) => b.persentaseKepatuhan - a.persentaseKepatuhan);
@@ -355,15 +406,35 @@ export default function App() {
 
   // Excel exports
   const handleExportIuranExcel = () => {
-    const headers = ['No', 'Nama Penghulu', 'NIP', 'Kabupaten / Kota', 'KUA Kecamatan', 'Periode', 'Nominal', 'Status', 'Metode', 'Tgl Bayar', 'No. Resi'];
+    const headers = [
+      'No', 
+      'Nama Penghulu', 
+      'NIP', 
+      'Kabupaten / Kota', 
+      'KUA Kecamatan', 
+      'Periode', 
+      'Jenis Iuran', 
+      'Nominal (Rp)', 
+      'Hak PC Cabang (60%)', 
+      'Hak PW Sulsel (25%)', 
+      'Hak PP Pusat (15%)', 
+      'Status', 
+      'Metode', 
+      'Tgl Bayar', 
+      'No. Resi Kwitansi'
+    ];
     const rows = filteredRecords.map((r, i) => [
       i + 1,
       r.memberNama,
-      r.nip,
+      isEncryptionActive ? maskNIP(r.nip) : r.nip,
       r.kabKota,
       r.kuaKecamatan,
-      `${NAMA_BULAN[r.periodeBulan - 1]} ${r.periodeTahun}`,
+      r.periodeBulan === 0 ? 'Pendaftaran' : `${NAMA_BULAN[r.periodeBulan - 1]} ${r.periodeTahun}`,
+      r.jenisIuran === 'PANGKAL' ? 'Iuran Pangkal (1x)' : 'Iuran Bulanan',
       r.nominal,
+      r.distribusi?.pcNominal ?? r.distribusi?.pc ?? (r.jenisIuran === 'PANGKAL' ? 0 : Math.round(r.nominal * 0.6)),
+      r.distribusi?.pwNominal ?? r.distribusi?.pw ?? (r.jenisIuran === 'PANGKAL' ? 0 : Math.round(r.nominal * 0.25)),
+      r.distribusi?.ppNominal ?? r.distribusi?.pp ?? (r.jenisIuran === 'PANGKAL' ? 0 : Math.round(r.nominal * 0.15)),
       r.status,
       r.metodePembayaran || '-',
       r.tanggalBayar || '-',
@@ -477,11 +548,12 @@ export default function App() {
             </button>
             <button
               onClick={() => setActiveTab('KEUANGAN')}
-              className={`hover:text-emerald-800 transition-colors whitespace-nowrap shrink-0 ${
+              className={`hover:text-emerald-800 transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
                 activeTab === 'KEUANGAN' ? 'text-emerald-800 font-bold' : ''
               }`}
             >
-              Buku Kas (BKU)
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Laporan Keuangan</span>
             </button>
             <button
               onClick={() => setActiveTab('PENGINGAT')}
@@ -746,6 +818,111 @@ export default function App() {
 
                 </div>
 
+                {/* AD/ART APRI Distribution Breakdown Card */}
+                <div className="bg-gradient-to-br from-emerald-900 via-emerald-950 to-slate-950 text-white rounded-2xl p-6 shadow-md border border-emerald-800/60">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-emerald-800/50">
+                    <div className="space-y-1.5">
+                      <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-emerald-800/80 text-emerald-200 text-[11px] font-semibold tracking-wide border border-emerald-600/40">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
+                        SKEMA AD/ART & PERATURAN ORGANISASI (PO) APRI
+                      </div>
+                      <h3 className="text-base sm:text-lg font-bold text-white tracking-tight">
+                        Alokasi Distribusi Berjenjang Iuran Bulanan (Rp 50.000 / Bulan)
+                      </h3>
+                      <p className="text-xs text-emerald-200/80 max-w-2xl leading-relaxed">
+                        • <strong className="text-white">Iuran Pangkal: Rp 100.000</strong> (dibayarkan sekali saat pendaftaran anggota baru).<br />
+                        • <strong className="text-white">Iuran Bulanan: Rp 50.000</strong> dialokasikan berjenjang ke struktur organisasi: 60% Cabang, 25% Wilayah, 15% Pusat.
+                      </p>
+                    </div>
+
+                    <div className="text-left lg:text-right bg-emerald-900/60 p-3.5 rounded-xl border border-emerald-700/50 shrink-0">
+                      <span className="text-[11px] text-emerald-300 font-medium block">Total Iuran Bulanan Terkumpul</span>
+                      <span className="text-xl sm:text-2xl font-bold font-mono text-white">{formatRupiah(stats.totalBulananTerkumpul)}</span>
+                      {stats.totalPangkalTerkumpul > 0 && (
+                        <div className="text-[10px] text-emerald-300/90 mt-1 font-mono">
+                          + Iuran Pangkal: {formatRupiah(stats.totalPangkalTerkumpul)}
+                        </div>
+                      )}
+                      {currentUser?.role === 'BENDAHARA_CABANG' && currentUser.kabKota && (
+                        <div className="mt-2 pt-2 border-t border-emerald-800/60 text-[11px] text-amber-300 font-semibold">
+                          Hak Cabang {currentUser.kabKota}: {formatRupiah(stats.totalPorsiPC)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 3 Tier Grid: PC 60%, PW 25%, PP 15% */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-5">
+                    
+                    {/* PC 60% */}
+                    <div className="bg-white/10 hover:bg-white/15 backdrop-blur-xs rounded-xl p-4 border border-emerald-500/30 transition-all">
+                      <div className="flex items-center justify-between text-xs text-emerald-200 mb-2">
+                        <span className="font-bold flex items-center gap-1.5 text-white">
+                          <Building2 className="w-4 h-4 text-emerald-400" />
+                          <span>Pengurus Cabang (PC)</span>
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-500/30 text-emerald-200 font-bold font-mono text-xs border border-emerald-400/40">
+                          60%
+                        </span>
+                      </div>
+                      <div className="text-xl font-bold font-mono text-emerald-300">
+                        {formatRupiah(stats.totalPorsiPC)}
+                      </div>
+                      <div className="text-xs text-slate-300 mt-1 font-medium">
+                        Rp 30.000 / anggota per bulan
+                      </div>
+                      <p className="text-[11px] text-emerald-200/70 mt-2 border-t border-white/10 pt-2 leading-relaxed">
+                        Dikelola oleh Bendahara Cabang Kemenag Kab/Kota untuk pembinaan dan kegiatan kepenghuluan tingkat daerah.
+                      </p>
+                    </div>
+
+                    {/* PW 25% */}
+                    <div className="bg-white/10 hover:bg-white/15 backdrop-blur-xs rounded-xl p-4 border border-emerald-500/30 transition-all">
+                      <div className="flex items-center justify-between text-xs text-emerald-200 mb-2">
+                        <span className="font-bold flex items-center gap-1.5 text-white">
+                          <Landmark className="w-4 h-4 text-emerald-400" />
+                          <span>Pengurus Wilayah (PW)</span>
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-500/30 text-emerald-200 font-bold font-mono text-xs border border-emerald-400/40">
+                          25%
+                        </span>
+                      </div>
+                      <div className="text-xl font-bold font-mono text-emerald-300">
+                        {formatRupiah(stats.totalPorsiPW)}
+                      </div>
+                      <div className="text-xs text-slate-300 mt-1 font-medium">
+                        Rp 12.500 / anggota per bulan
+                      </div>
+                      <p className="text-[11px] text-emerald-200/70 mt-2 border-t border-white/10 pt-2 leading-relaxed">
+                        Kas Wilayah APRI Sulawesi Selatan untuk operasional kepengurusan provinsi, advokasi, dan rapat koordinasi.
+                      </p>
+                    </div>
+
+                    {/* PP 15% */}
+                    <div className="bg-white/10 hover:bg-white/15 backdrop-blur-xs rounded-xl p-4 border border-emerald-500/30 transition-all">
+                      <div className="flex items-center justify-between text-xs text-emerald-200 mb-2">
+                        <span className="font-bold flex items-center gap-1.5 text-white">
+                          <Compass className="w-4 h-4 text-emerald-400" />
+                          <span>Pengurus Pusat (PP)</span>
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-500/30 text-emerald-200 font-bold font-mono text-xs border border-emerald-400/40">
+                          15%
+                        </span>
+                      </div>
+                      <div className="text-xl font-bold font-mono text-emerald-300">
+                        {formatRupiah(stats.totalPorsiPP)}
+                      </div>
+                      <div className="text-xs text-slate-300 mt-1 font-medium">
+                        Rp 7.500 / anggota per bulan
+                      </div>
+                      <p className="text-[11px] text-emerald-200/70 mt-2 border-t border-white/10 pt-2 leading-relaxed">
+                        Kewajiban setoran berjenjang ke Pengurus Pusat APRI di Jakarta sesuai AD/ART & Peraturan Organisasi.
+                      </p>
+                    </div>
+
+                  </div>
+                </div>
+
                 {/* Split 2-Column: Quick Gateway Reconciliation & Regional Leaderboard */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   
@@ -893,16 +1070,20 @@ export default function App() {
 
                       <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
                         {regionalSummaries.slice(0, 8).map((reg, idx) => (
-                          <div key={reg.kabKota} className="text-xs">
-                            <div className="flex justify-between items-center mb-1">
-                              <span className="font-semibold text-slate-800">
+                          <div key={reg.kabKota} className="text-xs p-2 rounded-lg bg-slate-50/70 border border-slate-100">
+                            <div className="flex justify-between items-center mb-0.5">
+                              <span className="font-semibold text-slate-800 text-xs">
                                 {idx + 1}. {reg.kabKota.replace('Kab. ', '').replace('Kota ', '')}
                               </span>
-                              <span className="font-mono text-slate-500">
-                                {reg.lunasCount}/{reg.totalAnggota} ({reg.persentaseKepatuhan}%)
+                              <span className="font-mono text-emerald-800 font-semibold text-[11px]">
+                                {formatRupiah(reg.porsiPC)} (60%)
                               </span>
                             </div>
-                            <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                            <div className="flex justify-between items-center text-[10px] text-slate-500 mb-1.5 font-mono">
+                              <span>Lunas: {reg.lunasCount}/{reg.totalAnggota} Penghulu</span>
+                              <span className="font-bold text-slate-700">{reg.persentaseKepatuhan}% Kepatuhan</span>
+                            </div>
+                            <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
                               <div 
                                 className={`h-full rounded-full transition-all duration-500 ${
                                   reg.persentaseKepatuhan >= 80 
@@ -1040,8 +1221,9 @@ export default function App() {
                         <th className="py-3 px-4">No</th>
                         <th className="py-3 px-4">Nama Penghulu & NIP</th>
                         <th className="py-3 px-4">KUA Kecamatan / Kab-Kota</th>
+                        <th className="py-3 px-4 text-center">Jenis Iuran</th>
                         <th className="py-3 px-4 text-center">Jatuh Tempo</th>
-                        <th className="py-3 px-4 text-right">Nominal</th>
+                        <th className="py-3 px-4 text-right">Nominal & Alokasi</th>
                         <th className="py-3 px-4 text-center">Status</th>
                         <th className="py-3 px-4 text-center">Tgl Bayar & Saluran</th>
                         <th className="py-3 px-4 text-right">Aksi</th>
@@ -1050,7 +1232,7 @@ export default function App() {
                     <tbody className="divide-y divide-slate-100">
                       {filteredRecords.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="py-8 text-center text-slate-500">
+                          <td colSpan={9} className="py-8 text-center text-slate-500">
                             Tidak ditemukan data iuran dengan kriteria pencarian di atas.
                           </td>
                         </tr>
@@ -1080,11 +1262,38 @@ export default function App() {
                                 <div>{rec.kuaKecamatan}</div>
                                 <div className="text-[11px] text-slate-400">{rec.kabKota}</div>
                               </td>
+                              <td className="py-3 px-4 text-center">
+                                {rec.jenisIuran === 'PANGKAL' ? (
+                                  <span className="px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 font-semibold text-[10px] border border-purple-200">
+                                    Iuran Pangkal
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 font-semibold text-[10px] border border-emerald-200">
+                                    Iuran Bulanan
+                                  </span>
+                                )}
+                              </td>
                               <td className="py-3 px-4 text-center font-mono text-slate-600">
                                 {rec.tanggalJatuhTempo}
                               </td>
-                              <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
-                                {formatRupiah(rec.nominal)}
+                              <td className="py-3 px-4 text-right">
+                                <div className="font-mono font-bold text-slate-900">
+                                  {formatRupiah(rec.nominal)}
+                                </div>
+                                {rec.jenisIuran === 'PANGKAL' ? (
+                                  <div className="text-[10px] text-purple-700 font-medium">
+                                    Pendaftaran (1x)
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className="text-[10px] text-emerald-700 font-medium font-mono">
+                                      Hak PC (60%): {formatRupiah(rec.distribusi?.pcNominal ?? rec.distribusi?.pc ?? 30000)}
+                                    </div>
+                                    <div className="text-[9px] text-slate-400 font-normal">
+                                      PW 25% • PP 15%
+                                    </div>
+                                  </>
+                                )}
                               </td>
                               <td className="py-3 px-4 text-center">
                                 {rec.status === 'LUNAS' && (
@@ -1255,131 +1464,20 @@ export default function App() {
               </div>
             )}
 
-            {/* TAB 4: BUKU KAS UMUM (BKU) */}
+            {/* TAB 4: LAPORAN KEUANGAN & BUKU KAS UMUM */}
             {activeTab === 'KEUANGAN' && (
-              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-6">
-                
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-900">
-                      Buku Kas Umum (BKU) & Laporan Keuangan Organisasi
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      Penerimaan iuran, kas operasional sekretariat, dana santunan, dan kegiatan Bimtek Penghulu
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setCashFlowModalOpen(true)}
-                      className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Catat Transaksi Kas</span>
-                    </button>
-                    <button
-                      onClick={handleExportCashFlowExcel}
-                      disabled={cashFlow.length === 0}
-                      className="px-3.5 py-2 border border-slate-300 hover:bg-slate-50 rounded-xl text-xs font-semibold text-slate-700 flex items-center gap-1.5 transition-colors disabled:opacity-50"
-                    >
-                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-                      <span>Ekspor Excel</span>
-                    </button>
-                    <button
-                      onClick={() => generateLaporanKeuanganPDF(
-                        cashFlow,
-                        selectedBulan,
-                        selectedTahun,
-                        stats.totalPemasukanBKU,
-                        stats.totalPengeluaranBKU,
-                        stats.saldoKasSaatIni
-                      )}
-                      disabled={cashFlow.length === 0}
-                      className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
-                    >
-                      <FileText className="w-3.5 h-3.5" />
-                      <span>Cetak Laporan PDF</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Financial Summary Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="bg-emerald-50/60 border border-emerald-200 rounded-xl p-4">
-                    <span className="text-xs text-emerald-800 font-semibold flex items-center gap-1">
-                      <ArrowDownLeft className="w-4 h-4 text-emerald-700" /> Total Penerimaan Kas
-                    </span>
-                    <div className="text-xl font-bold font-mono text-emerald-900 mt-1">
-                      {formatRupiah(stats.totalPemasukanBKU)}
-                    </div>
-                  </div>
-
-                  <div className="bg-rose-50/60 border border-rose-200 rounded-xl p-4">
-                    <span className="text-xs text-rose-800 font-semibold flex items-center gap-1">
-                      <ArrowUpRight className="w-4 h-4 text-rose-700" /> Total Pengeluaran Kas
-                    </span>
-                    <div className="text-xl font-bold font-mono text-rose-900 mt-1">
-                      {formatRupiah(stats.totalPengeluaranBKU)}
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-900 text-white rounded-xl p-4">
-                    <span className="text-xs text-slate-300 font-semibold">
-                      Saldo Kas Organisasi
-                    </span>
-                    <div className="text-xl font-bold font-mono text-emerald-400 mt-1">
-                      {formatRupiah(stats.saldoKasSaatIni)}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Cash flow entries table */}
-                <div className="border border-slate-200 rounded-xl overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-                      <tr>
-                        <th className="py-2.5 px-3">Tanggal</th>
-                        <th className="py-2.5 px-3">Uraian / Keterangan Transaksi</th>
-                        <th className="py-2.5 px-3">Pos Anggaran</th>
-                        <th className="py-2.5 px-3 text-right">Kas Masuk (Rp)</th>
-                        <th className="py-2.5 px-3 text-right">Kas Keluar (Rp)</th>
-                        <th className="py-2.5 px-3">Penanggung Jawab</th>
-                        <th className="py-2.5 px-3">No. Bukti</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {cashFlow.length === 0 ? (
-                        <tr>
-                          <td colSpan={7} className="py-8 text-center text-slate-400">
-                            Belum ada catatan buku kas umum. Klik tombol "Catat Transaksi Kas" untuk menambahkan.
-                          </td>
-                        </tr>
-                      ) : (
-                        cashFlow.map(entry => (
-                          <tr key={entry.id} className="hover:bg-slate-50/70 transition-colors">
-                            <td className="py-2.5 px-3 font-mono text-slate-600">{entry.tanggal}</td>
-                            <td className="py-2.5 px-3 font-medium text-slate-900">{entry.keterangan}</td>
-                            <td className="py-2.5 px-3 text-slate-500">
-                              <span className="bg-slate-100 px-2 py-0.5 rounded text-[11px] font-medium text-slate-700">
-                                {entry.kategori.replace('_', ' ')}
-                              </span>
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-mono font-semibold text-emerald-700">
-                              {entry.jenis === 'MASUK' ? formatRupiah(entry.nominal) : '-'}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-mono font-semibold text-rose-700">
-                              {entry.jenis === 'KELUAR' ? formatRupiah(entry.nominal) : '-'}
-                            </td>
-                            <td className="py-2.5 px-3 text-slate-600">{entry.penanggungJawab}</td>
-                            <td className="py-2.5 px-3 font-mono text-slate-400">{entry.buktiRef || '-'}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-              </div>
+              <FinancialReportView
+                currentUser={currentUser}
+                cashFlow={cashFlow}
+                records={records}
+                members={members}
+                onOpenAddModal={() => setCashFlowModalOpen(true)}
+                onDeleteEntry={(id) => setCashFlow(prev => prev.filter(c => c.id !== id))}
+                selectedBulan={selectedBulan}
+                setSelectedBulan={setSelectedBulan}
+                selectedTahun={selectedTahun}
+                setSelectedTahun={setSelectedTahun}
+              />
             )}
 
             {/* TAB 5: NOTIFIKASI & PENGINGAT JATUH TEMPO */}
@@ -1522,6 +1620,8 @@ export default function App() {
         onAddEntry={handleAddCashEntry}
         currentBulan={selectedBulan}
         currentTahun={selectedTahun}
+        currentUser={currentUser}
+        defaultKabKota={currentUser?.kabKota || (selectedKabKota !== 'SEMUA' ? selectedKabKota : undefined)}
       />
 
     </div>
