@@ -27,7 +27,11 @@ import {
   ChevronRight,
   TrendingUp,
   Receipt,
-  UserCheck
+  UserCheck,
+  LogOut,
+  User,
+  ShieldAlert,
+  RotateCcw
 } from 'lucide-react';
 
 import { 
@@ -35,11 +39,11 @@ import {
   IuranRecord, 
   CashFlowEntry, 
   NotificationLog, 
-  RegionalSummary 
+  RegionalSummary,
+  AuthUser 
 } from './types';
 import { 
   INITIAL_MEMBERS, 
-  generateInitialIuranRecords, 
   INITIAL_CASH_FLOW, 
   INITIAL_NOTIFICATIONS, 
   KAB_KOTA_SULSEL, 
@@ -59,28 +63,35 @@ import { ReminderModal } from './components/ReminderModal';
 import { MemberDetailModal } from './components/MemberDetailModal';
 import { CashFlowModal } from './components/CashFlowModal';
 import { MobileAppView } from './components/MobileAppView';
+import { AuthScreen } from './components/AuthScreen';
 
 const SEAL_IMAGE_URL = '/src/assets/images/apri_sulsel_seal_1792985704534.jpg';
 
 export default function App() {
-  // Persistence state
+  // Authentication State
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
+    const saved = localStorage.getItem('apri_current_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  // Master Data state (Default empty as requested)
   const [members, setMembers] = useState<PenghuluMember[]>(() => {
-    const saved = localStorage.getItem('apri_members');
+    const saved = localStorage.getItem('apri_members_v2');
     return saved ? JSON.parse(saved) : INITIAL_MEMBERS;
   });
 
   const [records, setRecords] = useState<IuranRecord[]>(() => {
-    const saved = localStorage.getItem('apri_records');
-    return saved ? JSON.parse(saved) : generateInitialIuranRecords(INITIAL_MEMBERS);
+    const saved = localStorage.getItem('apri_records_v2');
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [cashFlow, setCashFlow] = useState<CashFlowEntry[]>(() => {
-    const saved = localStorage.getItem('apri_cashflow');
+    const saved = localStorage.getItem('apri_cashflow_v2');
     return saved ? JSON.parse(saved) : INITIAL_CASH_FLOW;
   });
 
   const [notifications, setNotifications] = useState<NotificationLog[]>(() => {
-    const saved = localStorage.getItem('apri_notifications');
+    const saved = localStorage.getItem('apri_notifications_v2');
     return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
   });
 
@@ -90,7 +101,7 @@ export default function App() {
   const [isEncryptionActive, setIsEncryptionActive] = useState(true);
 
   // Filters
-  const [selectedBulan, setSelectedBulan] = useState<number>(10); // Oktober
+  const [selectedBulan, setSelectedBulan] = useState<number>(10); // Oktober 2026
   const [selectedTahun, setSelectedTahun] = useState<number>(2026);
   const [selectedKabKota, setSelectedKabKota] = useState<string>('SEMUA');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -99,55 +110,135 @@ export default function App() {
   // Modals state
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [activePaymentRecord, setActivePaymentRecord] = useState<IuranRecord | null>(null);
-  
   const [reminderModalOpen, setReminderModalOpen] = useState(false);
-  
   const [memberDetailModalOpen, setMemberDetailModalOpen] = useState(false);
   const [activeMemberDetail, setActiveMemberDetail] = useState<PenghuluMember | null>(null);
-
   const [cashFlowModalOpen, setCashFlowModalOpen] = useState(false);
 
-  // Sync to local storage
+  // Synchronize authentication and role adjustments
   useEffect(() => {
-    localStorage.setItem('apri_members', JSON.stringify(members));
+    if (currentUser) {
+      localStorage.setItem('apri_current_user', JSON.stringify(currentUser));
+      // If branch admin, lock or scope default filter to their branch
+      if (currentUser.role === 'BENDAHARA_CABANG' && currentUser.kabKota) {
+        setSelectedKabKota(currentUser.kabKota);
+      }
+      // If member, switch to mobile mode by default
+      if (currentUser.role === 'ANGGOTA_PENGHULU') {
+        setDeviceMode('MOBILE');
+      }
+    } else {
+      localStorage.removeItem('apri_current_user');
+    }
+  }, [currentUser]);
+
+  // Sync data to localStorage
+  useEffect(() => {
+    localStorage.setItem('apri_members_v2', JSON.stringify(members));
   }, [members]);
 
   useEffect(() => {
-    localStorage.setItem('apri_records', JSON.stringify(records));
+    localStorage.setItem('apri_records_v2', JSON.stringify(records));
   }, [records]);
 
   useEffect(() => {
-    localStorage.setItem('apri_cashflow', JSON.stringify(cashFlow));
+    localStorage.setItem('apri_cashflow_v2', JSON.stringify(cashFlow));
   }, [cashFlow]);
 
   useEffect(() => {
-    localStorage.setItem('apri_notifications', JSON.stringify(notifications));
+    localStorage.setItem('apri_notifications_v2', JSON.stringify(notifications));
   }, [notifications]);
 
-  // Derived filtered iuran records for the chosen period & filters
+  // Handle new member registration
+  const handleRegisterMember = (newMember: PenghuluMember) => {
+    // 1. Add to members
+    const updatedMembers = [newMember, ...members];
+    setMembers(updatedMembers);
+
+    // 2. Generate monthly iuran records for this member for 2026 (Januari s/d Oktober)
+    const newRecords: IuranRecord[] = [];
+    for (let month = 1; month <= 10; month++) {
+      const monthStr = month < 10 ? `0${month}` : `${month}`;
+      newRecords.push({
+        id: `IUR-2026-${monthStr}-${newMember.id}`,
+        memberId: newMember.id,
+        memberNama: newMember.namaLengkap,
+        nip: newMember.nip,
+        kabKota: newMember.kabKota,
+        kuaKecamatan: newMember.kuaKecamatan,
+        periodeBulan: month,
+        periodeTahun: 2026,
+        nominal: IURAN_WAJIB_DEFAULT,
+        status: 'BELUM_BAYAR',
+        tanggalJatuhTempo: `2026-${monthStr}-10`
+      });
+    }
+
+    setRecords(prev => [...newRecords, ...prev]);
+
+    // 3. Emit registration welcome log
+    const welcomeNotif: NotificationLog = {
+      id: `NOTIF-REG-${Date.now()}`,
+      memberId: newMember.id,
+      memberNama: newMember.namaLengkap,
+      noWa: newMember.noHpWa,
+      kabKota: newMember.kabKota,
+      kuaKecamatan: newMember.kuaKecamatan,
+      periodeBulan: 10,
+      periodeTahun: 2026,
+      tipe: 'BROADCAST_BULANAN',
+      channel: 'WhatsApp',
+      statusKirim: 'Terkirim',
+      timestamp: new Date().toLocaleString('id-ID'),
+      pesan: `Ahlan wa Sahlan Bapak Penghulu ${newMember.namaLengkap} di APRI Sulawesi Selatan. KTA Digital dan akun portal iuran Anda telah aktif.`
+    };
+
+    setNotifications(prev => [welcomeNotif, ...prev]);
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+  };
+
+  // Filter records based on role, period, kab/kota, search
   const currentPeriodRecords = useMemo(() => {
     return records.filter(r => r.periodeBulan === selectedBulan && r.periodeTahun === selectedTahun);
   }, [records, selectedBulan, selectedTahun]);
 
   const filteredRecords = useMemo(() => {
     return currentPeriodRecords.filter(r => {
-      const matchKab = selectedKabKota === 'SEMUA' || r.kabKota === selectedKabKota;
+      // If branch admin, enforce their branch
+      if (currentUser?.role === 'BENDAHARA_CABANG' && currentUser.kabKota) {
+        if (r.kabKota !== currentUser.kabKota) return false;
+      } else if (selectedKabKota !== 'SEMUA') {
+        if (r.kabKota !== selectedKabKota) return false;
+      }
+
+      // If logged in as member, show only their own records in member view
+      if (currentUser?.role === 'ANGGOTA_PENGHULU' && currentUser.nip) {
+        if (r.nip !== currentUser.nip) return false;
+      }
+
       const matchStatus = statusFilter === 'SEMUA' || r.status === statusFilter;
       const query = searchQuery.toLowerCase().trim();
       const matchQuery = !query || 
         r.memberNama.toLowerCase().includes(query) || 
         r.nip.includes(query) ||
         r.kuaKecamatan.toLowerCase().includes(query);
-      return matchKab && matchStatus && matchQuery;
+      return matchStatus && matchQuery;
     });
-  }, [currentPeriodRecords, selectedKabKota, statusFilter, searchQuery]);
+  }, [currentPeriodRecords, currentUser, selectedKabKota, statusFilter, searchQuery]);
 
-  // Financial statistics
+  // Statistics calculation
   const stats = useMemo(() => {
-    const totalRecordsInPeriod = currentPeriodRecords.length;
-    const lunasRecords = currentPeriodRecords.filter(r => r.status === 'LUNAS');
-    const belumBayarRecords = currentPeriodRecords.filter(r => r.status === 'BELUM_BAYAR' || r.status === 'TERLAMBAT');
-    const waitingRecords = currentPeriodRecords.filter(r => r.status === 'MENUNGGU_VERIFIKASI');
+    const scopeRecords = currentUser?.role === 'BENDAHARA_CABANG' && currentUser.kabKota
+      ? currentPeriodRecords.filter(r => r.kabKota === currentUser.kabKota)
+      : currentPeriodRecords;
+
+    const totalRecordsInPeriod = scopeRecords.length;
+    const lunasRecords = scopeRecords.filter(r => r.status === 'LUNAS');
+    const belumBayarRecords = scopeRecords.filter(r => r.status === 'BELUM_BAYAR' || r.status === 'TERLAMBAT');
+    const waitingRecords = scopeRecords.filter(r => r.status === 'MENUNGGU_VERIFIKASI');
 
     const totalDanaTerkumpul = lunasRecords.reduce((acc, curr) => acc + curr.nominal, 0);
     const totalTunggakan = belumBayarRecords.reduce((acc, curr) => acc + curr.nominal, 0);
@@ -155,7 +246,6 @@ export default function App() {
       ? Math.round((lunasRecords.length / totalRecordsInPeriod) * 100) 
       : 0;
 
-    // Overall cash balance from BKU
     const totalPemasukanBKU = cashFlow
       .filter(c => c.jenis === 'MASUK')
       .reduce((acc, curr) => acc + curr.nominal, 0);
@@ -177,9 +267,9 @@ export default function App() {
       totalPengeluaranBKU,
       pendingMembers: belumBayarRecords
     };
-  }, [currentPeriodRecords, cashFlow]);
+  }, [currentPeriodRecords, cashFlow, currentUser]);
 
-  // Regional breakdown analysis
+  // Regional breakdown
   const regionalSummaries: RegionalSummary[] = useMemo(() => {
     return KAB_KOTA_SULSEL.map(kab => {
       const kabRecords = currentPeriodRecords.filter(r => r.kabKota === kab);
@@ -200,12 +290,10 @@ export default function App() {
     }).sort((a, b) => b.persentaseKepatuhan - a.persentaseKepatuhan);
   }, [currentPeriodRecords]);
 
-  // Payment completed handler
+  // Payment success handler
   const handlePaymentSuccess = (updatedRecord: IuranRecord) => {
-    // 1. Update iuran record
     setRecords(prev => prev.map(r => r.id === updatedRecord.id ? updatedRecord : r));
 
-    // 2. Add to cash flow general ledger automatically
     const newCashEntry: CashFlowEntry = {
       id: `BKU-${selectedTahun}-${Date.now().toString().slice(-4)}`,
       tanggal: updatedRecord.tanggalBayar || new Date().toISOString().split('T')[0],
@@ -214,13 +302,13 @@ export default function App() {
       nominal: updatedRecord.nominal,
       keterangan: `Penerimaan Iuran ${NAMA_BULAN[updatedRecord.periodeBulan - 1]} ${updatedRecord.periodeTahun} - ${updatedRecord.memberNama} (${updatedRecord.metodePembayaran})`,
       buktiRef: updatedRecord.kodeKwitansi,
-      penanggungJawab: 'Gateway Otomatis APRI Sulsel',
+      penanggungJawab: currentUser?.namaLengkap || 'Gateway Otomatis APRI Sulsel',
       periodeBulan: updatedRecord.periodeBulan,
-      periodeTahun: updatedRecord.periodeTahun
+      periodeTahun: updatedRecord.periodeTahun,
+      kabKota: updatedRecord.kabKota
     };
     setCashFlow(prev => [newCashEntry, ...prev]);
 
-    // 3. Emit notification confirmation
     const newNotif: NotificationLog = {
       id: `NOTIF-${Date.now().toString().slice(-4)}`,
       memberId: updatedRecord.memberId,
@@ -261,7 +349,6 @@ export default function App() {
     setNotifications(prev => [...newLogs, ...prev]);
   };
 
-  // Add new cash entry
   const handleAddCashEntry = (entry: CashFlowEntry) => {
     setCashFlow(prev => [entry, ...prev]);
   };
@@ -286,7 +373,7 @@ export default function App() {
       `Rekap_Iuran_APRI_Sulsel_${NAMA_BULAN[selectedBulan - 1]}_${selectedTahun}`,
       headers,
       rows,
-      `REKAPITULASI IURAN ANGGOTA PW APRI SULAWESI SELATAN - ${NAMA_BULAN[selectedBulan - 1].toUpperCase()} ${selectedTahun}`
+      `REKAPITULASI IURAN ANGGOTA APRI SULAWESI SELATAN - ${NAMA_BULAN[selectedBulan - 1].toUpperCase()} ${selectedTahun}`
     );
   };
 
@@ -322,6 +409,18 @@ export default function App() {
     ]);
     exportToExcel('Buku_Kas_Umum_APRI_Sulsel_2026', headers, rows, 'BUKU KAS UMUM (BKU) PW APRI SULAWESI SELATAN TAHUN 2026');
   };
+
+  // If user is not authenticated, show AuthScreen
+  if (!currentUser) {
+    return (
+      <AuthScreen
+        onLoginSuccess={(user) => setCurrentUser(user)}
+        onRegisterMember={handleRegisterMember}
+        members={members}
+        sealImageUrl={SEAL_IMAGE_URL}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col text-slate-900 selection:bg-emerald-100 selection:text-emerald-900">
@@ -374,7 +473,7 @@ export default function App() {
                 activeTab === 'ANGGOTA' ? 'text-emerald-800 font-bold' : ''
               }`}
             >
-              Data Anggota
+              Data Anggota ({members.length})
             </button>
             <button
               onClick={() => setActiveTab('KEUANGAN')}
@@ -408,23 +507,40 @@ export default function App() {
               <Bell className="w-3.5 h-3.5" />
               <span>Kirim Pengingat ({stats.belumBayarCount})</span>
             </button>
+
+            {/* Logout button */}
+            <button
+              onClick={handleLogout}
+              className="p-2 text-slate-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl border border-slate-200 transition-colors"
+              title="Keluar dari akun"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
 
         </div>
       </header>
 
-      {/* Secondary Workspace Toolbar (Device Switcher, Regional Filter, Encryption Toggle) */}
+      {/* Secondary Workspace Toolbar */}
       <div className="bg-slate-100/80 border-b border-slate-200 px-4 sm:px-6 py-2.5">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
           
-          {/* Breadcrumb / Mode Info */}
-          <div className="flex items-center gap-2 text-slate-500">
-            <span className="font-medium text-slate-800">Wilayah Sulsel</span>
-            <span>/</span>
-            <span>Bendahara: Drs. H. Muhammad Asyik, M.Ag.</span>
-            <span>/</span>
-            <span className="text-emerald-800 font-medium">
-              Periode {NAMA_BULAN[selectedBulan - 1]} {selectedTahun}
+          {/* User Role Badge & Breadcrumb */}
+          <div className="flex items-center gap-2">
+            <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
+              currentUser.role === 'BENDAHARA_WILAYAH'
+                ? 'bg-emerald-800 text-white'
+                : (currentUser.role === 'BENDAHARA_CABANG' ? 'bg-amber-600 text-white' : 'bg-slate-700 text-white')
+            }`}>
+              {currentUser.role === 'BENDAHARA_WILAYAH' 
+                ? 'ADMIN BENDAHARA WILAYAH (PW SULSEL)' 
+                : (currentUser.role === 'BENDAHARA_CABANG' 
+                    ? `ADMIN BENDAHARA PC (${currentUser.kabKota})` 
+                    : 'ANGGOTA PENGHULU KUA')}
+            </span>
+            <span className="text-slate-500 hidden sm:inline">|</span>
+            <span className="font-semibold text-slate-800 hidden sm:inline">
+              {currentUser.namaLengkap}
             </span>
           </div>
 
@@ -479,10 +595,28 @@ export default function App() {
       {/* Main Body View */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
         
-        {/* If Mobile App simulation mode is chosen */}
+        {/* If Mobile App mode is chosen */}
         {deviceMode === 'MOBILE' ? (
           <MobileAppView
-            members={members}
+            members={members.length > 0 ? members : [
+              {
+                id: 'MEM-000',
+                nip: currentUser.nip || '198001012005011001',
+                namaLengkap: currentUser.namaLengkap,
+                jabatan: (currentUser.jabatan as any) || 'Penghulu Ahli Muda',
+                kuaKecamatan: currentUser.kuaKecamatan || 'KUA Kecamatan',
+                kabKota: currentUser.kabKota || 'Kota Makassar',
+                noHpWa: '081242338899',
+                email: currentUser.email,
+                rekeningBank: {
+                  namaBank: 'Bank Sulselbar Syariah',
+                  noRek: '510000000000',
+                  atasNama: currentUser.namaLengkap
+                },
+                statusKeanggotaan: 'Aktif',
+                joinDate: '2026-01-01'
+              }
+            ]}
             records={records}
             onOpenPayment={(r) => {
               setActivePaymentRecord(r);
@@ -500,12 +634,12 @@ export default function App() {
           /* DESKTOP WEB ADMIN PORTAL */
           <div className="space-y-6">
 
-            {/* Navigation Tab pills for Mobile / Tablet screens where Topbar nav is hidden */}
+            {/* Navigation Tab pills for Mobile / Tablet screens */}
             <div className="flex lg:hidden overflow-x-auto gap-2 pb-2">
               {[
                 { id: 'DASHBOARD', label: 'Dashboard' },
                 { id: 'REKAPITULASI', label: 'Rekapitulasi Iuran' },
-                { id: 'ANGGOTA', label: 'Data Anggota' },
+                { id: 'ANGGOTA', label: `Data Anggota (${members.length})` },
                 { id: 'KEUANGAN', label: 'Buku Kas (BKU)' },
                 { id: 'PENGINGAT', label: `Pengingat (${stats.belumBayarCount})` },
               ].map(tab => (
@@ -522,6 +656,29 @@ export default function App() {
                 </button>
               ))}
             </div>
+
+            {/* Empty State Banner if no members yet */}
+            {members.length === 0 && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 text-center space-y-3">
+                <div className="w-12 h-12 bg-emerald-100 text-emerald-800 rounded-full flex items-center justify-center mx-auto">
+                  <UserCheck className="w-6 h-6" />
+                </div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Data Bawaan Telah Dikosongkan (Sistem Siap Digunakan)
+                </h3>
+                <p className="text-xs text-slate-600 max-w-lg mx-auto leading-relaxed">
+                  Data anggota telah bersih dari data bawaan. Anggota penghulu KUA se-Sulawesi Selatan dapat mendaftarkan diri secara mandiri melalui tombol pendaftaran di bawah atau halaman login.
+                </p>
+                <div className="pt-2 flex items-center justify-center gap-3">
+                  <button
+                    onClick={() => handleLogout()}
+                    className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors"
+                  >
+                    Buka Formulir Pendaftaran Anggota
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* TAB 1: DASHBOARD UTAMA */}
             {activeTab === 'DASHBOARD' && (
@@ -562,25 +719,25 @@ export default function App() {
                   {/* KPI 3: Saldo Kas Organisasi APRI (BKU) */}
                   <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
                     <div className="flex items-center justify-between text-xs text-slate-500 mb-2">
-                      <span>Saldo Kas PW APRI Sulsel</span>
+                      <span>Saldo Kas Organisasi</span>
                       <TrendingUp className="w-4 h-4 text-emerald-700" />
                     </div>
                     <div className="text-2xl font-bold font-mono tabular-nums text-emerald-800">
                       {formatRupiah(stats.saldoKasSaatIni)}
                     </div>
                     <div className="text-xs text-slate-500 mt-2">
-                      Akumulasi kas riil terverifikasi
+                      {currentUser.role === 'BENDAHARA_CABANG' ? `Kas Cabang ${currentUser.kabKota}` : 'Kas Wilayah APRI Sulsel'}
                     </div>
                   </div>
 
-                  {/* KPI 4: Kepatuhan Wilayah Sulsel */}
+                  {/* KPI 4: Total Anggota Terdaftar */}
                   <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
                     <div className="flex items-center justify-between text-xs text-slate-500 mb-2">
-                      <span>Cakupan 24 Kab/Kota</span>
-                      <MapPin className="w-4 h-4 text-emerald-700" />
+                      <span>Anggota Terdaftar</span>
+                      <Users className="w-4 h-4 text-emerald-700" />
                     </div>
                     <div className="text-2xl font-bold font-mono tabular-nums text-slate-900">
-                      24 Wilayah
+                      {members.length} Penghulu
                     </div>
                     <div className="text-xs text-slate-500 mt-2">
                       KUA se-Sulawesi Selatan
@@ -592,7 +749,7 @@ export default function App() {
                 {/* Split 2-Column: Quick Gateway Reconciliation & Regional Leaderboard */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   
-                  {/* Left 2 Cols: Real-time Gateway Transactions & Recent Activity */}
+                  {/* Left 2 Cols: Real-time Gateway Transactions */}
                   <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
                     <div className="flex items-center justify-between">
                       <div>
@@ -612,7 +769,7 @@ export default function App() {
                       </button>
                     </div>
 
-                    {/* Table of recent records */}
+                    {/* Table of records */}
                     <div className="border border-slate-200 rounded-xl overflow-x-auto">
                       <table className="w-full text-left text-xs">
                         <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
@@ -625,68 +782,77 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {currentPeriodRecords.slice(0, 6).map((rec) => {
-                            const member = members.find(m => m.id === rec.memberId);
-                            return (
-                              <tr key={rec.id} className="hover:bg-slate-50/70 transition-colors">
-                                <td className="py-2.5 px-3">
-                                  <div className="font-semibold text-slate-900">{rec.memberNama}</div>
-                                  <div className="text-[11px] font-mono text-slate-400">
-                                    NIP: {isEncryptionActive ? maskNIP(rec.nip) : rec.nip}
-                                  </div>
-                                </td>
-                                <td className="py-2.5 px-3 text-slate-600">
-                                  <div>{rec.kuaKecamatan}</div>
-                                  <div className="text-[11px] text-slate-400">{rec.kabKota}</div>
-                                </td>
-                                <td className="py-2.5 px-3 text-right font-mono font-semibold text-slate-900">
-                                  {formatRupiah(rec.nominal)}
-                                </td>
-                                <td className="py-2.5 px-3 text-center">
-                                  {rec.status === 'LUNAS' ? (
-                                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
-                                      <CheckCircle2 className="w-3 h-3" /> Lunas
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md">
-                                      <Clock className="w-3 h-3" /> {rec.status.replace('_', ' ')}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="py-2.5 px-3 text-right">
-                                  {rec.status === 'LUNAS' ? (
-                                    <button
-                                      onClick={() => generateKwitansiPDF(rec, member)}
-                                      className="px-2.5 py-1 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md text-[11px] font-medium transition-colors"
-                                      title="Cetak Kwitansi PDF"
-                                    >
-                                      Kwitansi
-                                    </button>
-                                  ) : (
-                                    <button
-                                      onClick={() => {
-                                        setActivePaymentRecord(rec);
-                                        setPaymentModalOpen(true);
-                                      }}
-                                      className="px-2.5 py-1 text-white bg-emerald-800 hover:bg-emerald-700 rounded-md text-[11px] font-semibold transition-colors"
-                                    >
-                                      Bayar Gateway
-                                    </button>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
+                          {filteredRecords.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="py-8 text-center text-slate-400">
+                                Belum ada data iuran pada periode ini. Data akan otomatis muncul ketika anggota terdaftar.
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredRecords.slice(0, 6).map((rec) => {
+                              const member = members.find(m => m.id === rec.memberId);
+                              return (
+                                <tr key={rec.id} className="hover:bg-slate-50/70 transition-colors">
+                                  <td className="py-2.5 px-3">
+                                    <div className="font-semibold text-slate-900">{rec.memberNama}</div>
+                                    <div className="text-[11px] font-mono text-slate-400">
+                                      NIP: {isEncryptionActive ? maskNIP(rec.nip) : rec.nip}
+                                    </div>
+                                  </td>
+                                  <td className="py-2.5 px-3 text-slate-600">
+                                    <div>{rec.kuaKecamatan}</div>
+                                    <div className="text-[11px] text-slate-400">{rec.kabKota}</div>
+                                  </td>
+                                  <td className="py-2.5 px-3 text-right font-mono font-semibold text-slate-900">
+                                    {formatRupiah(rec.nominal)}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center">
+                                    {rec.status === 'LUNAS' ? (
+                                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                                        <CheckCircle2 className="w-3 h-3" /> Lunas
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md">
+                                        <Clock className="w-3 h-3" /> {rec.status.replace('_', ' ')}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-right">
+                                    {rec.status === 'LUNAS' ? (
+                                      <button
+                                        onClick={() => generateKwitansiPDF(rec, member)}
+                                        className="px-2.5 py-1 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md text-[11px] font-medium transition-colors"
+                                        title="Cetak Kwitansi PDF"
+                                      >
+                                        Kwitansi
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={() => {
+                                          setActivePaymentRecord(rec);
+                                          setPaymentModalOpen(true);
+                                        }}
+                                        className="px-2.5 py-1 text-white bg-emerald-800 hover:bg-emerald-700 rounded-md text-[11px] font-semibold transition-colors"
+                                      >
+                                        Bayar Gateway
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
                         </tbody>
                       </table>
                     </div>
 
                     <div className="pt-2 flex items-center justify-between text-xs text-slate-500">
-                      <span>Menampilkan 6 anggota terdepan periode {NAMA_BULAN[selectedBulan - 1]}</span>
+                      <span>Menampilkan rekapitulasi periode {NAMA_BULAN[selectedBulan - 1]}</span>
                       <div className="flex gap-2">
                         <button
                           onClick={handleExportIuranExcel}
-                          className="px-3 py-1.5 border border-slate-300 rounded-lg hover:bg-slate-50 font-medium text-slate-700 flex items-center gap-1.5 transition-colors"
+                          disabled={filteredRecords.length === 0}
+                          className="px-3 py-1.5 border border-slate-300 rounded-lg hover:bg-slate-50 font-medium text-slate-700 flex items-center gap-1.5 transition-colors disabled:opacity-50"
                         >
                           <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
                           <span>Ekspor Excel</span>
@@ -700,7 +866,8 @@ export default function App() {
                             stats.belumBayarCount, 
                             stats.totalDanaTerkumpul
                           )}
-                          className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-medium flex items-center gap-1.5 transition-colors"
+                          disabled={currentPeriodRecords.length === 0}
+                          className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-medium flex items-center gap-1.5 transition-colors disabled:opacity-50"
                         >
                           <FileText className="w-3.5 h-3.5" />
                           <span>Cetak Rekap PDF</span>
@@ -740,7 +907,7 @@ export default function App() {
                                 className={`h-full rounded-full transition-all duration-500 ${
                                   reg.persentaseKepatuhan >= 80 
                                     ? 'bg-emerald-600' 
-                                    : (reg.persentaseKepatuhan >= 50 ? 'bg-amber-500' : 'bg-rose-500')
+                                    : (reg.persentaseKepatuhan >= 50 ? 'bg-amber-500' : 'bg-slate-400')
                                 }`}
                                 style={{ width: `${reg.persentaseKepatuhan}%` }}
                               />
@@ -777,7 +944,6 @@ export default function App() {
 
                   {/* Period and Export Buttons */}
                   <div className="flex flex-wrap items-center gap-2">
-                    {/* Bulan selector */}
                     <select
                       value={selectedBulan}
                       onChange={(e) => setSelectedBulan(Number(e.target.value))}
@@ -790,7 +956,6 @@ export default function App() {
                       ))}
                     </select>
 
-                    {/* Tahun selector */}
                     <select
                       value={selectedTahun}
                       onChange={(e) => setSelectedTahun(Number(e.target.value))}
@@ -802,7 +967,8 @@ export default function App() {
 
                     <button
                       onClick={handleExportIuranExcel}
-                      className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                      disabled={filteredRecords.length === 0}
+                      className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
                     >
                       <FileSpreadsheet className="w-3.5 h-3.5" />
                       <span>Ekspor Excel</span>
@@ -817,7 +983,8 @@ export default function App() {
                         stats.belumBayarCount,
                         stats.totalDanaTerkumpul
                       )}
-                      className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                      disabled={filteredRecords.length === 0}
+                      className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
                     >
                       <FileText className="w-3.5 h-3.5" />
                       <span>Cetak PDF Resmi</span>
@@ -841,9 +1008,12 @@ export default function App() {
                   <select
                     value={selectedKabKota}
                     onChange={(e) => setSelectedKabKota(e.target.value)}
-                    className="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-emerald-600"
+                    disabled={currentUser.role === 'BENDAHARA_CABANG'}
+                    className="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-emerald-600 disabled:opacity-75"
                   >
-                    <option value="SEMUA">Semua 24 Kab / Kota di Sulsel</option>
+                    {currentUser.role === 'BENDAHARA_WILAYAH' && (
+                      <option value="SEMUA">Semua 24 Kab / Kota di Sulsel</option>
+                    )}
                     {KAB_KOTA_SULSEL.map(k => (
                       <option key={k} value={k}>{k}</option>
                     ))}
@@ -981,22 +1151,10 @@ export default function App() {
                   </table>
                 </div>
 
-                {/* Table Footer Summary */}
-                <div className="pt-2 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-3">
-                  <div>
-                    Total Data: <strong>{filteredRecords.length}</strong> Anggota Penghulu
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span>Lunas: <strong className="text-emerald-700">{filteredRecords.filter(r => r.status === 'LUNAS').length}</strong></span>
-                    <span>Belum: <strong className="text-amber-700">{filteredRecords.filter(r => r.status !== 'LUNAS').length}</strong></span>
-                    <span>Total Dana: <strong className="text-slate-900 font-mono font-bold">{formatRupiah(filteredRecords.filter(r => r.status === 'LUNAS').reduce((s, r) => s + r.nominal, 0))}</strong></span>
-                  </div>
-                </div>
-
               </div>
             )}
 
-            {/* TAB 3: DATA ANGGOTA PENGHULU SE-SULSEL */}
+            {/* TAB 3: DATA ANGGOTA PENGHULU */}
             {activeTab === 'ANGGOTA' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
@@ -1005,14 +1163,15 @@ export default function App() {
                       Master Data Anggota Penghulu APRI Sulawesi Selatan
                     </h3>
                     <p className="text-xs text-slate-500">
-                      Total {members.length} anggota penghulu KUA aktif terdaftar di PW APRI Sulsel
+                      Total {members.length} anggota penghulu KUA aktif terdaftar di sistem
                     </p>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <button
                       onClick={handleExportMembersExcel}
-                      className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                      disabled={members.length === 0}
+                      className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
                     >
                       <FileSpreadsheet className="w-3.5 h-3.5" />
                       <span>Ekspor Excel</span>
@@ -1021,75 +1180,82 @@ export default function App() {
                 </div>
 
                 {/* Members Grid / Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {members.map(member => (
-                    <div 
-                      key={member.id} 
-                      className="border border-slate-200 rounded-xl p-4 hover:border-emerald-500/60 transition-all bg-white hover:shadow-xs flex flex-col justify-between"
-                    >
-                      <div>
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-800">
-                              {member.jabatan}
+                {members.length === 0 ? (
+                  <div className="py-12 text-center text-slate-400">
+                    <Users className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                    <p className="font-semibold text-slate-700">Belum ada anggota terdaftar.</p>
+                    <p className="text-xs text-slate-400 mt-1">Data akan terisi ketika penghulu melakukan pendaftaran.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {members.map(member => (
+                      <div 
+                        key={member.id} 
+                        className="border border-slate-200 rounded-xl p-4 hover:border-emerald-500/60 transition-all bg-white hover:shadow-xs flex flex-col justify-between"
+                      >
+                        <div>
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-800">
+                                {member.jabatan}
+                              </span>
+                              <h4 className="text-sm font-bold text-slate-900 mt-0.5">
+                                {member.namaLengkap} {member.gelarBelakang && `, ${member.gelarBelakang}`}
+                              </h4>
+                              <div className="text-xs text-slate-500 mt-0.5">
+                                {member.kuaKecamatan} · {member.kabKota}
+                              </div>
+                            </div>
+                            <span className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 text-xs font-bold">
+                              {member.id.replace('MEM-', '')}
                             </span>
-                            <h4 className="text-sm font-bold text-slate-900 mt-0.5">
-                              {member.namaLengkap} {member.gelarBelakang && `, ${member.gelarBelakang}`}
-                            </h4>
-                            <div className="text-xs text-slate-500 mt-0.5">
-                              {member.kuaKecamatan} · {member.kabKota}
+                          </div>
+
+                          <div className="mt-4 pt-3 border-t border-slate-100 space-y-1.5 text-xs">
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">NIP:</span>
+                              <span className="font-mono text-slate-700">
+                                {isEncryptionActive ? maskNIP(member.nip) : member.nip}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">WhatsApp:</span>
+                              <span className="font-mono text-slate-700">
+                                {isEncryptionActive ? maskPhone(member.noHpWa) : member.noHpWa}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">Rekening:</span>
+                              <span className="font-mono text-slate-700 truncate max-w-[170px]">
+                                {member.rekeningBank.namaBank} · {isEncryptionActive ? maskBank(member.rekeningBank.noRek) : member.rekeningBank.noRek}
+                              </span>
                             </div>
                           </div>
-                          <span className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 text-xs font-bold">
-                            {member.id.replace('MEM-', '')}
+                        </div>
+
+                        <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                          <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                            {member.statusKeanggotaan}
                           </span>
-                        </div>
-
-                        {/* Encrypted / Masked details preview */}
-                        <div className="mt-4 pt-3 border-t border-slate-100 space-y-1.5 text-xs">
-                          <div className="flex justify-between">
-                            <span className="text-slate-400">NIP:</span>
-                            <span className="font-mono text-slate-700">
-                              {isEncryptionActive ? maskNIP(member.nip) : member.nip}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-400">WhatsApp:</span>
-                            <span className="font-mono text-slate-700">
-                              {isEncryptionActive ? maskPhone(member.noHpWa) : member.noHpWa}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-400">Rekening:</span>
-                            <span className="font-mono text-slate-700 truncate max-w-[170px]">
-                              {member.rekeningBank.namaBank} · {isEncryptionActive ? maskBank(member.rekeningBank.noRek) : member.rekeningBank.noRek}
-                            </span>
-                          </div>
+                          <button
+                            onClick={() => {
+                              setActiveMemberDetail(member);
+                              setMemberDetailModalOpen(true);
+                            }}
+                            className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-1"
+                          >
+                            <span>Lihat KTA</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
-
-                      <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
-                          {member.statusKeanggotaan}
-                        </span>
-                        <button
-                          onClick={() => {
-                            setActiveMemberDetail(member);
-                            setMemberDetailModalOpen(true);
-                          }}
-                          className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-1"
-                        >
-                          <span>Lihat KTA</span>
-                          <ChevronRight className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
-            {/* TAB 4: BUKU KAS UMUM (BKU) & LAPORAN ARUS KAS */}
+            {/* TAB 4: BUKU KAS UMUM (BKU) */}
             {activeTab === 'KEUANGAN' && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-6">
                 
@@ -1113,7 +1279,8 @@ export default function App() {
                     </button>
                     <button
                       onClick={handleExportCashFlowExcel}
-                      className="px-3.5 py-2 border border-slate-300 hover:bg-slate-50 rounded-xl text-xs font-semibold text-slate-700 flex items-center gap-1.5 transition-colors"
+                      disabled={cashFlow.length === 0}
+                      className="px-3.5 py-2 border border-slate-300 hover:bg-slate-50 rounded-xl text-xs font-semibold text-slate-700 flex items-center gap-1.5 transition-colors disabled:opacity-50"
                     >
                       <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
                       <span>Ekspor Excel</span>
@@ -1127,7 +1294,8 @@ export default function App() {
                         stats.totalPengeluaranBKU,
                         stats.saldoKasSaatIni
                       )}
-                      className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                      disabled={cashFlow.length === 0}
+                      className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-50"
                     >
                       <FileText className="w-3.5 h-3.5" />
                       <span>Cetak Laporan PDF</span>
@@ -1157,7 +1325,7 @@ export default function App() {
 
                   <div className="bg-slate-900 text-white rounded-xl p-4">
                     <span className="text-xs text-slate-300 font-semibold">
-                      Saldo Akhir Kas APRI Sulsel
+                      Saldo Kas Organisasi
                     </span>
                     <div className="text-xl font-bold font-mono text-emerald-400 mt-1">
                       {formatRupiah(stats.saldoKasSaatIni)}
@@ -1180,25 +1348,33 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {cashFlow.map(entry => (
-                        <tr key={entry.id} className="hover:bg-slate-50/70 transition-colors">
-                          <td className="py-2.5 px-3 font-mono text-slate-600">{entry.tanggal}</td>
-                          <td className="py-2.5 px-3 font-medium text-slate-900">{entry.keterangan}</td>
-                          <td className="py-2.5 px-3 text-slate-500">
-                            <span className="bg-slate-100 px-2 py-0.5 rounded text-[11px] font-medium text-slate-700">
-                              {entry.kategori.replace('_', ' ')}
-                            </span>
+                      {cashFlow.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-8 text-center text-slate-400">
+                            Belum ada catatan buku kas umum. Klik tombol "Catat Transaksi Kas" untuk menambahkan.
                           </td>
-                          <td className="py-2.5 px-3 text-right font-mono font-semibold text-emerald-700">
-                            {entry.jenis === 'MASUK' ? formatRupiah(entry.nominal) : '-'}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-mono font-semibold text-rose-700">
-                            {entry.jenis === 'KELUAR' ? formatRupiah(entry.nominal) : '-'}
-                          </td>
-                          <td className="py-2.5 px-3 text-slate-600">{entry.penanggungJawab}</td>
-                          <td className="py-2.5 px-3 font-mono text-slate-400">{entry.buktiRef || '-'}</td>
                         </tr>
-                      ))}
+                      ) : (
+                        cashFlow.map(entry => (
+                          <tr key={entry.id} className="hover:bg-slate-50/70 transition-colors">
+                            <td className="py-2.5 px-3 font-mono text-slate-600">{entry.tanggal}</td>
+                            <td className="py-2.5 px-3 font-medium text-slate-900">{entry.keterangan}</td>
+                            <td className="py-2.5 px-3 text-slate-500">
+                              <span className="bg-slate-100 px-2 py-0.5 rounded text-[11px] font-medium text-slate-700">
+                                {entry.kategori.replace('_', ' ')}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono font-semibold text-emerald-700">
+                              {entry.jenis === 'MASUK' ? formatRupiah(entry.nominal) : '-'}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono font-semibold text-rose-700">
+                              {entry.jenis === 'KELUAR' ? formatRupiah(entry.nominal) : '-'}
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-600">{entry.penanggungJawab}</td>
+                            <td className="py-2.5 px-3 font-mono text-slate-400">{entry.buktiRef || '-'}</td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1231,35 +1407,41 @@ export default function App() {
 
                 {/* Notifications timeline list */}
                 <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 overflow-hidden">
-                  {notifications.map(notif => (
-                    <div key={notif.id} className="p-4 hover:bg-slate-50/70 transition-colors text-xs flex flex-col sm:flex-row justify-between sm:items-center gap-3">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            notif.tipe === 'KONFIRMASI_LUNAS'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}>
-                            {notif.tipe.replace('_', ' ')}
-                          </span>
-                          <span className="font-semibold text-slate-800">{notif.memberNama}</span>
-                          <span className="text-slate-400">· {notif.kuaKecamatan} ({notif.kabKota})</span>
-                        </div>
-                        <p className="text-slate-600 max-w-3xl leading-relaxed">
-                          "{notif.pesan}"
-                        </p>
-                      </div>
-
-                      <div className="text-right shrink-0">
-                        <div className="text-[11px] text-slate-400 font-mono">
-                          {notif.timestamp}
-                        </div>
-                        <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded">
-                          {notif.channel} · {notif.statusKirim}
-                        </span>
-                      </div>
+                  {notifications.length === 0 ? (
+                    <div className="p-8 text-center text-slate-400">
+                      Belum ada log notifikasi terkirim. Gunakan tombol "Buka Engine Pengingat" untuk mengirimkan notifikasi.
                     </div>
-                  ))}
+                  ) : (
+                    notifications.map(notif => (
+                      <div key={notif.id} className="p-4 hover:bg-slate-50/70 transition-colors text-xs flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              notif.tipe === 'KONFIRMASI_LUNAS'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {notif.tipe.replace('_', ' ')}
+                            </span>
+                            <span className="font-semibold text-slate-800">{notif.memberNama}</span>
+                            <span className="text-slate-400">· {notif.kuaKecamatan} ({notif.kabKota})</span>
+                          </div>
+                          <p className="text-slate-600 max-w-3xl leading-relaxed">
+                            "{notif.pesan}"
+                          </p>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <div className="text-[11px] text-slate-400 font-mono">
+                            {notif.timestamp}
+                          </div>
+                          <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded">
+                            {notif.channel} · {notif.statusKirim}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
 
               </div>

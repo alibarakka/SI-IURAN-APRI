@@ -15,6 +15,23 @@ export type ExpenseCategory =
   | 'ADVOKASI_HUKUM'
   | 'OPERASIONAL_SEKRETARIAT';
 
+export type UserRole = 
+  | 'BENDAHARA_WILAYAH'     // Admin Bendahara Wilayah APRI Sulsel (Akses seluruh 24 Kab/Kota)
+  | 'BENDAHARA_CABANG'      // Admin Bendahara Pimpinan Cabang APRI Kota/Kabupaten
+  | 'ANGGOTA_PENGHULU';     // Anggota Penghulu KUA
+
+export interface AuthUser {
+  id: string;
+  namaLengkap: string;
+  email: string;
+  nip?: string;
+  role: UserRole;
+  kabKota?: string;        // Nama Kab/Kota spesifik untuk Bendahara Cabang & Anggota
+  kuaKecamatan?: string;
+  jabatan?: string;
+  memberId?: string;       // Relasi ke PenghuluMember
+}
+
 export interface PenghuluMember {
   id: string;
   nip: string;
@@ -27,6 +44,7 @@ export interface PenghuluMember {
   kabKota: string;
   noHpWa: string;
   email: string;
+  password?: string;
   rekeningBank: {
     namaBank: string;
     noRek: string;
@@ -74,6 +92,7 @@ export interface CashFlowEntry {
   penanggungJawab: string;
   periodeBulan: number;
   periodeTahun: number;
+  kabKota?: string; // Dapat diasosiasikan dengan kas cabang atau wilayah
 }
 
 export interface NotificationLog {
