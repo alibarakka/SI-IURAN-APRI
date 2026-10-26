@@ -1,0 +1,6 @@
+{
+  "name": "SI-IURAN APRI Sulsel",
+  "description": "Sistem Informasi Iuran Anggota Asosiasi Penghulu Republik Indonesia (APRI) Sulawesi Selatan - Rekapitulasi Otomatis, Payment Gateway, Pengingat Jatuh Tempo, dan Enkripsi Data.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
